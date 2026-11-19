@@ -35,7 +35,7 @@ class PublicationFailed(ReviewError):
 
 
 def identifier(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value.isprintable() or value.strip() != value:
+    if not isinstance(value, str) or not value or not value.isprintable() or value.strip() != value:
         raise InvalidInput(f'{field} must be a nonempty printable string without outer whitespace')
     return value
 

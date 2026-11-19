@@ -19,6 +19,11 @@ def initialize_scoring(db: sqlite3.Connection, *, origin: str | None = None) -> 
     if origin is not None:
         identifier(origin, 'source origin')
     db.execute('''
+        CREATE TABLE IF NOT EXISTS score_revision_sequence (
+            revision INTEGER PRIMARY KEY AUTOINCREMENT
+        )
+    ''')
+    db.execute('''
         CREATE TABLE IF NOT EXISTS score_origin (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             origin TEXT NOT NULL
@@ -138,9 +143,11 @@ class ScoreLedger:
     def append_revision(self, pair: ScorePair, correction_code: str | None = None) -> ScoreRevision:
         if correction_code is None:
             self._establish_occurrence(pair)
-        cursor = self.db.execute('''
-            INSERT INTO score_versions(station, occurrence, label, first_score, second_score, correction_code)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (pair.station, pair.occurrence, pair.label.value, str(pair.scores[0]),
+        cursor = self.db.execute('INSERT INTO score_revision_sequence DEFAULT VALUES')
+        revision = cursor.lastrowid
+        self.db.execute('''
+            INSERT INTO score_versions(revision, station, occurrence, label, first_score, second_score, correction_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (revision, pair.station, pair.occurrence, pair.label.value, str(pair.scores[0]),
               str(pair.scores[1]), correction_code))
-        return ScoreRevision(cursor.lastrowid, pair, correction_code)
+        return ScoreRevision(revision, pair, correction_code)

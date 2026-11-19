@@ -16,7 +16,7 @@ python3 -B check_project.py
 python3 -B review.py demo
 ```
 
-演示使用临时目录中的独立源库与归档库，从 `samples/shift.json` 接纳测次并冻结两站，关闭源库后签发比较。同时验收 `samples/foreign-stations.json` 中的反向外站件。`samples/manual-ledger.json` 保存独立手算账，演示核对实际统计与归档领取后输出两条 `POINTWISE_SCENARIO` 和两份 JSON 导出。
+演示使用临时目录中的独立源库与归档库，从 `samples/shift.json` 接纳测次并冻结两站，关闭源库后签发比较。同时验收 `samples/foreign-stations.json` 中的反向外站件。`samples/manual-ledger.json` 保存独立手算账，演示核对实际统计与归档领取后输出两条 `POINTWISE_SCENARIO` 和两份 JSON 导出。演示随后运行 V2 共同复核：接纳 `common_support_examples.py` 的高、低覆盖两班并打印 `SPARSE_COVERAGE_SHIFT`，在本地稀疏源库冻结东西两站后关闭源库、断源签发跨站报告（`SPARSE_SOURCE_CLOSED`），再重开归档按原号领取（`SPARSE_REOPEN_CLAIM`）。
 
 ## Python API
 
@@ -40,3 +40,24 @@ V1 站件包含 `version`、`package_id`、`models`、`source` 和 `contribution
 AUC 对整个合池的正负记录对求平均。正分较高、同分、较低分别记 1、1/2、0。每次剔除删除同票在所有入选站的全部贡献，并在剩余全池重算两列。只保留仍有正负两类的剔除，按票号排序。有效票数为 m 时，协方差为同票两列各减去列均值后的乘积之和乘以 `(m−1)/m`。全量缺一类或有效票少于两个时返回 `INSUFFICIENT_EVIDENCE`。报告数值使用 `Fraction`，选件排列不影响数值和出处顺序。同一轮使用不同站点时，跨站正负比较与站内比较使用同一权重。
 
 业务异常继承 `storage.ReviewError`，以 `code` 区分 `INVALID_INPUT`、`CONFLICT`、`MISSING_ITEM`、`INVALID_STATION_EVIDENCE`、`INVALID_SELECTION`、`INSUFFICIENT_EVIDENCE`、`PUBLICATION_FAILED`。报告主体、出处和回执一次提交。签发被拒或提交失败时没有新报告或回执。报告编号在归档库内有效，旧报告可在更正、站件更新和重开后继续按原号读取。
+
+## 夜班共同测次复核（V2 稀疏流程）
+
+`COMMON_SUPPORT.md` 定义分批上线模型的共同获评复核，入口同样从 `review` 导入，与 V1 共用 `open_source`、`open_archive`，但使用独立的表、件号前缀（`sparse-`）和报告编号空间。
+
+| 调用 | 结果 |
+| --- | --- |
+| `record_sparse_scores(source, station, ticket, occurrence, label, submission_id, scores)` | 接纳具名稀疏分数，返回可冻结的正整数修订。同站同测次首记固定票与正负标签；同提交号等价重投返回原修订，异参或更改票、标签抛 `Conflict`。不同提交可补分或更正，零是有效分数。 |
+| `freeze_sparse_station(source, archive, station, revision)` | 按修订边界取每个模型的最后可见值，冻结 V2 站件并返回带 `.package_id`、`.source` 的 `SparseStationEvidence`。 |
+| `encode_sparse_evidence(evidence)` / `accept_sparse_station(archive, payload, EvidenceSource(...))` | 导出或验收 `version: 2` 站件；来源声明不一致、形状计数错误或件号冲突抛 `InvalidEvidence`，拒收无新增。 |
+| `read_sparse_station(archive, package_id)` | 按号领取归档中的稀疏站件。 |
+| `issue_common_comparison(archive, package_ids, models)` | 对至少两个有序互异模型签发共同获评报告；同件去重、每站限一件，选入 V1 件或未知件抛 `InvalidSelection`。 |
+| `read_common_report(archive, report_id, *, as_json=False)` | 按号领取固定的共同比较结果，源库更正与归档重开后仍兑现原号。 |
+
+### 接纳截面如何交给冻结站件
+
+稀疏录入把每次提交原样记入版本表，并在测次登记表上固定 `(站, 测次) -> (票, 标签)`。冻结指定修订时，快照器只读取修订号不晚于边界的版本，对每个 `(测次, 模型)` 保留最后一条分数；缺席的模型不补零。冻结器再按 `(票, 标签, 完整获评模型集合)` 分组，把逐行分数折叠成带重数的有理数列，各组 `count` 与每列重数合计一致。交换文本只移交分组列与重数，不移交逐行组合，因此合作方之间只共享复核所需的截面。
+
+### 报告怎样建立共同样本
+
+签发时先按站、件号规则选件，再仅保留完整获评集合包含全部请求模型的组；被整组筛掉的站件仍保留在报告出处中。保留组按票合池，正负测次数对 `count` 求和，每列在合池上按 V1 的同分计半规则计算精确 AUC。删板只对共同样本中出现的票做整票剔除（同步删除该票在所有入选站的贡献），删除后仍含两类才记为有效删板并按票号排序；协方差矩阵在同一批有效删板记录上按各减列均值的乘积和乘以 `(m-1)/m` 计算，含对角项。全量缺一类或有效删板不足两张抛 `InsufficientEvidence`。报告主体、出处与回执在同一事务写入，提交失败抛 `PUBLICATION_FAILED` 且无部分成果，可重试。
